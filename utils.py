@@ -359,14 +359,15 @@ def Huber(y_true, y_pred, delta, axis=None):
     losses = 0.5 * quadratic**2 + delta * linear
     return tf.reduce_mean(losses, axis=axis)
 
-def cv2_imsave(img_path, img):
+def cv2_imsave(img_path, img, quality=100):
     img = np.squeeze(img)
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
-    cv2.imwrite(img_path, img)
+    cv2.imwrite(img_path, img, [int(cv2.IMWRITE_JPEG_QUALITY),quality])
 
 def cv2_imread(img_path):
     img=cv2.imread(img_path)
+    # img=cv2.resize(img, (int(img.shape[1]*0.1), int(img.shape[0]*0.1)))
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
     return img

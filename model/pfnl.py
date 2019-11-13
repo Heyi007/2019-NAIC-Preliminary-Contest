@@ -40,6 +40,8 @@ class PFNL(VSR):
         self.main_channel_nums =64 #64
         self.save_iter_gap = 500
         self.nonLocal_sub_sample_rate = 1
+
+
     def forward(self, x):
         
         dk=3
@@ -288,59 +290,49 @@ class PFNL(VSR):
             all_time=np.array(all_time)
             print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
 
+    def init_test_session(self):
 
-    def test_video_lr(self, path, output_path, name='PFNL_result', reuse=False, part=10000):
+        L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, 10, 10, 3], name='L_test')
+        SR_test=self.forward(L_test)
+
+        config = tf.ConfigProto() 
+        config.gpu_options.allow_growth = True
+         
+        #sess=tf.Session()
+        self.sess = tf.Session(config=config)
+        self.sess.run(tf.global_variables_initializer())
+        self.saver = tf.train.Saver(max_to_keep=100, keep_checkpoint_every_n_hours=1)
+        self.load(self.sess, self.save_dir)
+        
+
+    def test_video_lr(self, path, output_path, exp_name='PFNL_result'):
+        num_once = 1
         _, video_name = os.path.split(path)
-        save_path=join(output_path, video_name, name)
+        save_path=join(output_path, exp_name, video_name)
         automkdir(save_path)
         imgs=sorted(glob.glob(join(path,'*.png')))
         max_frame=len(imgs)
         lrs=np.array([cv2_imread(i) for i in imgs])/255.
-
-        # lrs = []
-        # for i in imgs:
-        #     img = cv2_imread(i)
-        #     img = cv2.resize(img, (int(img.shape[1]*1), int(img.shape[0]*1)))
-        #     img = img / 255
-        #     lrs.append(img)
-        # lrs = np.array(lrs)
-        
-        if part>max_frame:
-            part=max_frame
-        if max_frame%part ==0 :
-            num_once=max_frame//part
-        else:
-            num_once=max_frame//part+1
-        
-        h,w,c=lrs[0].shape
-
-        L_test = tf.placeholder(tf.float32, shape=[num_once, self.num_frames, h, w, 3], name='L_test')
-        SR_test=self.forward(L_test)
-        if not reuse:
-            config = tf.ConfigProto() 
-            config.gpu_options.allow_growth = True
-            sess = tf.Session(config=config) 
-            #sess=tf.Session()
-            self.sess=sess
-            sess.run(tf.global_variables_initializer())
-            self.saver = tf.train.Saver(max_to_keep=100, keep_checkpoint_every_n_hours=1)
-            self.load(sess, self.save_dir)
-        
-
+        lrs = lrs.astype('float32')
+        h,w,_=lrs[0].shape
         lr_list=[]
-        max_frame=lrs.shape[0]
+        
         for i in range(max_frame):
             index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
             index=np.clip(index,0,max_frame-1).tolist()
             lr_list.append(np.array([lrs[j] for j in index]))
+        del lrs
         lr_list=np.array(lr_list)
-        
+       
+
+        L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
+        SR_test=self.forward(L_test)
+
         print('Save at {}'.format(save_path))
-        print('{} Inputs With Shape {}'.format(lrs.shape[0],lrs.shape[1:]))
-        h,w,c=lrs.shape[1:]
+        print('{} Inputs With Shape {}'.format(max_frame,[h,w]))
         
         all_time=[]
-        for i in trange(part):
+        for i in trange(max_frame):
             st_time=time.time()
             sr=self.sess.run(SR_test,feed_dict={L_test : lr_list[i*num_once:(i+1)*num_once]})
             all_time.append(time.time()-st_time)
@@ -348,12 +340,18 @@ class PFNL(VSR):
                 img=sr[j][0]*255.
                 img=np.clip(img,0,255)
                 img=np.round(img,0).astype(np.uint8)
-                cv2_imsave(join(save_path, '{:0>4}.png'.format(i*num_once+j)),img)
+                cv2_imsave(join(save_path, '{:0>4}.jpg'.format(i*num_once+j)),img, 100)
 
         all_time=np.array(all_time)
         if max_frame>0:
             all_time=np.array(all_time)
             print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
+        
+        del imgs
+        del L_test
+        del SR_test
+        # del lrs
+        del lr_list
 
     def testvideos(self, path='/dev/f/data/video/test2/udm10', start=0, name='pfnl'):
         kind=sorted(glob.glob(join(path,'*')))
