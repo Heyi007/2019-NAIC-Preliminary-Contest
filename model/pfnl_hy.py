@@ -12,6 +12,7 @@ from tensorflow.python.layers.convolutional import Conv2D,conv2d
 from utils import NonLocalBlock, DownSample, DownSample_4D, BLUR, get_num_params, cv2_imread, cv2_imsave, automkdir
 from tqdm import tqdm,trange
 from model.base_model import VSR
+from skimage.measure import compare_ssim, compare_psnr
 import cv2
 '''This is the official code of PFNL (Progressive Fusion Video Super-Resolution Network via Exploiting Non-Local Spatio-Temporal Correlations).
 The code is mainly based on https://github.com/psychopa4/MMCNN and https://github.com/jiangsutx/SPMC_VideoSR.
@@ -39,7 +40,7 @@ class Parameters():
         self.eval_dir='./data/validation.txt'
         self.save_dir='./checkpoint/pfnl'
         self.log_dir='./pfnl.txt'
-        self.exp_name = 'pfnl_hy_nonLocal_subsmaplex4_exp_2_no_eval_TEST'
+        self.exp_name = 'Temp'
         self.save_dir='./checkpoint/'+ self.exp_name
         self.log_dir='./txt_log/' + self.exp_name
         self.tensorboard_dir = './tb_log/' + self.exp_name
@@ -69,13 +70,14 @@ class PFNL(VSR):
         self.save_iter_gap = parameters.save_iter_gap
         self.nonLocal_sub_sample_rate =parameters.nonLocal_sub_sample_rate
 
+
         # build the main network computational graph
         self.GT = tf.placeholder(tf.float32, shape=[None, 1, None, None, 3], name='H_truth')
         self.L_train = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_frames, self.in_size, self.in_size, 3], name='L_train')
 
         self.SR = self.forward(self.L_train)
         self.loss = tf.reduce_mean(tf.sqrt((self.SR-self.GT)**2+1e-6))
-        
+
         # data loader and training supports
         self.LR_one_batch, self.HR_one_batch= self.double_input_producer()
         global_step=tf.Variable(initial_value=0, trainable=False)
@@ -85,33 +87,54 @@ class PFNL(VSR):
         vars_all=tf.trainable_variables()
         print('Params num of all:',get_num_params(vars_all))
         self.training_op = tf.train.AdamOptimizer(lr).minimize(self.loss, var_list=vars_all, global_step=global_step)
-        
-        # For tensorboard visualization
-        self.writer = tf.summary.FileWriter(self.tensorboard_dir, tf.get_default_graph())
-        tf.summary.scalar("loss", self.loss)
-        tf.summary.scalar("lr", lr)
-        self.merge_op = tf.summary.merge_all()
 
-        config = tf.ConfigProto() 
+
+        # For tensorboard visualization
+
+        # used in eval func
+        self.loss_epoch = tf.placeholder(tf.float32, shape=[], name='epoch_loss_placeholder')
+        self.epoch_loss_summary_op = tf.summary.scalar('loss/epoch loss', self.loss_epoch)
+        self.psnr_eval = tf.placeholder(tf.float32, shape=[], name='eval_psnr_placeholder')
+        self.eval_psnr_summary_op = tf.summary.scalar('metrics/eval psnr', self.psnr_eval)
+        self.ssim_eval = tf.placeholder(tf.float32, shape=[], name='eval_ssim_placeholder')
+        self.eval_ssim_summary_op = tf.summary.scalar('metrics/eval ssim', self.ssim_eval)
+        self.merge_op_eval = tf.summary.merge([self.epoch_loss_summary_op, self.eval_psnr_summary_op, self.eval_ssim_summary_op])
+
+        # used in iter training func
+        iter_loss_summary_op = tf.summary.scalar("loss/iter loss", self.loss)
+        lr_summary_op = tf.summary.scalar("lr", lr)
+        self.merge_op_training = tf.summary.merge([iter_loss_summary_op, lr_summary_op])
+
+
+        # writer, get session and hold it and some configs
+        self.writer = tf.summary.FileWriter(self.tensorboard_dir, tf.get_default_graph())
+
+        config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
-        self.sess = tf.Session(config=config) 
-    
+        self.sess = tf.Session(config=config)
+
         self.sess.run(tf.global_variables_initializer())
-        
+
         self.saver = tf.train.Saver(max_to_keep=50, keep_checkpoint_every_n_hours=1)
         if self.reload:
             print('[**] loading checkpoint in dir:'+ self.save_dir)
             self.load(self.sess, self.save_dir)
 
-        # eval_mse=tf.reduce_mean((SR_eval-H) ** 2, axis=[2,3,4])
-        # SR_eval = self.forward(L_eval)
 
-        # self.loss, self.eval_mse= loss, eval_mse
-        # self.L, self.L_eval, self.H, self.SR =  L_train, L_eval, H, SR_train
-
+        # eval file prepare
+        self.eval_frame_data_HR = []
+        self.eval_frame_data_LR = []
+        pathlists = open(self.eval_dir, 'rt').read().splitlines()
+        for dataPath in pathlists:
+            inList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/LR', dataPath, '*.png')))
+            gtList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/HR', dataPath, '*.png')))
+            assert(len(inList)==len(gtList))
+            self.eval_frame_data_HR.append(gtList)
+            self.eval_frame_data_LR.append(inList)
+      
 
     def forward(self, x):
-        
+
         dk=3
         activate=tf.nn.leaky_relu
         mf=self.main_channel_nums
@@ -126,7 +149,7 @@ class PFNL(VSR):
             conv2=[Conv2D(mf, dk, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='conv2_{}'.format(i)) for i in range(num_block)]
             convmerge1=Conv2D(48, 3, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='convmerge1')
             convmerge2=Conv2D(12, 3, strides=ds, padding='same', activation=None, kernel_initializer=ki, name='convmerge2')
-            
+
             inp0=[x[:,i,:,:,:] for i in range(f1)]
             inp0=tf.concat(inp0,axis=-1)
             inp1=tf.space_to_depth(inp0,2)
@@ -151,174 +174,91 @@ class PFNL(VSR):
             large1=tf.depth_to_space(merge,2)
             out1=convmerge2(large1)
             out=tf.depth_to_space(out1,2)
-                
+
         return tf.stack([out+bic], axis=1,name='out')#out
 
 
-    # def validation(self):
-    #     print('Validating on validation set ...')
-
-    
-
-    def eval(self):
-        print('Evaluating ...')
-        if not hasattr(self, 'sess'):
-            sess = tf.Session()
-            self.load(sess, self.save_dir)
-        else:
-            sess = self.sess
+    def eval(self, epoch, loss_epoch):
+        print('Evaluating on the validation set...')
+        psnr_all = 0
+        ssim_all = 0
+        count = 0
+        for video_index in range(0,len(self.eval_frame_data_LR)):
+            cur_video_LR = self.eval_frame_data_LR[video_index]
+            path, _ = os.path.split(cur_video_LR[0])
+            _, name = os.path.split(path)
             
-        border=8
-        in_h,in_w=self.eval_in_size
-        out_h = in_h*self.scale #512
-        out_w = in_w*self.scale #960
-        bd=border//self.scale
-        
-        eval_gt = tf.placeholder(tf.float32, [None, self.num_frames, out_h, out_w, 3])
-        eval_inp=DownSample(eval_gt, BLUR, scale=self.scale)
-        
-        filenames=open(self.eval_dir, 'rt').read().splitlines()
-        # sorted(glob.glob(join(self.eval_dir,'*')))
-        # gt_list=[sorted(glob.glob(join(f,'truth','*.png'))) for f in filenames]
-        gt_list=[sorted(glob.glob(join('H:/AI4K/data/frame_data/training/HR', f, '*.png'))) for f in filenames]
-        gt_list = gt_list[:3]
-        center=15
-        batch_gt = []
-        batch_cnt=0
-        mse_acc=None
-        for gtlist in gt_list:
-            max_frame=len(gtlist)
-            for idx0 in range(center, max_frame, 32):
-                index=np.array([i for i in range(idx0-self.num_frames//2,idx0+self.num_frames//2+1)])
+            cur_video_HR = self.eval_frame_data_HR[video_index]
+            max_frame = len(cur_video_LR)
+            temp_img = cv2_imread(cur_video_LR[0])
+            h,w,_ = temp_img.shape
+            L_eval = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
+            SR_test = self.forward(L_eval)
+            for i in range(max_frame):
+                print('[*Epoch:{:05d}] val video:{} -> frame:{:05d} '.format(epoch, name, i))
+                count+=1
+                index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
                 index=np.clip(index,0,max_frame-1).tolist()
-                gt=[cv2_imread(gtlist[i]) for i in index]
-                gt = [i[border:out_h+border, border:out_w+border, :].astype(np.float32) / 255.0 for i in gt]
-                batch_gt.append(np.stack(gt, axis=0))
-                
-                if len(batch_gt) == self.eval_basz:
-                    batch_gt = np.stack(batch_gt, 0)
-                    batch_lr=sess.run(eval_inp,feed_dict={eval_gt:batch_gt})
-                    mse_val=sess.run(self.eval_mse,feed_dict={self.L_eval:batch_lr, self.H:batch_gt[:,self.num_frames//2:self.num_frames//2+1]})
-                    if mse_acc is None:
-                        mse_acc = mse_val
-                    else:
-                        mse_acc = np.concatenate([mse_acc, mse_val], axis=0)
-                    batch_gt = []
-                    print('\tEval batch {} - {} ...'.format(batch_cnt, batch_cnt + self.eval_basz))
-                    batch_cnt+=self.eval_basz
-                    
-        psnr_acc = 10 * np.log10(1.0 / mse_acc)
-        mse_avg = np.mean(mse_acc, axis=0)
-        psnr_avg = np.mean(psnr_acc, axis=0)
-        for i in range(mse_avg.shape[0]):
-            tf.summary.scalar('val_mse{}'.format(i), tf.convert_to_tensor(mse_avg[i], dtype=tf.float32))
-        print('Eval PSNR: {}, MSE: {}'.format(psnr_avg, mse_avg))
+                lrs = np.array([cv2_imread(cur_video_LR[i]) for i in index])/255.0
+                lrs = lrs.astype('float32')
+                lrs = np.expand_dims(lrs, 0)
+
+                sr = self.sess.run(SR_test, feed_dict={L_eval: lrs})
+                sr = sr*255
+                sr = np.squeeze(sr, axis = (0,1))
+                sr = np.clip(sr,0,255)
+                sr = np.round(sr,0).astype(np.uint8)
+                hr = cv2_imread(cur_video_HR[i])
+                psnr_all += compare_psnr(sr, hr)
+                ssim_all += compare_ssim(sr, hr, multichannel = True)
+
+        a_psnr = psnr_all / count
+        a_ssim = ssim_all / count
+
+        eval_ss = self.sess.run(self.merge_op_eval, feed_dict={self.loss_epoch:loss_epoch, self.psnr_eval:a_psnr, self.ssim_eval:a_ssim})
+        self.writer.add_summary(eval_ss, epoch)
+
+        print('{'+'"Epoch": {:05d} , "Training Loss":{:.6f}, " Eval PSNR": {:.4f}, "Eval SSIM": {:.4f}'.format(epoch, loss_epoch, a_psnr, a_ssim)+'}')
         # write to log file
         with open(self.log_dir, 'a+') as f:
-            mse_avg=(mse_avg*1e6).astype(np.int64)/(1e6)
-            psnr_avg=(psnr_avg*1e6).astype(np.int64)/(1e6)
-            f.write('{'+'"Iter": {} , "PSNR": {}, "MSE": {}'.format(sess.run(self.global_step), psnr_avg.tolist(), mse_avg.tolist())+'}\n')
-    
+            f.write('{'+'"Epoch": {:05d} , "Training Loss":{:.6f}, " Eval PSNR": {:.4f}, "Eval SSIM": {:.4f}'.format(epoch, loss_epoch, a_psnr, a_ssim)+'}\n')
+
+
     def train(self):
-        
+
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=self.sess, coord=coord)
-
-        cost_time=0
-        start_time=time.time()
+        loss_epoch = 0
+        
         gs=self.sess.run(self.global_step)
+        epoch = int(gs / self.save_iter_gap)
         for step in range(self.sess.run(self.global_step), self.max_step):
-            if step>gs and step%20==0:
-                print(time.strftime("%Y-%m-%d %H:%M:%S",time.localtime()),'Step:{}, loss:{}'.format(step,loss_v))
-                
-            # eval and save model
-            if step % self.save_iter_gap == 0 and step!=0:
-                if step>gs:
-                    print('saving model at global step: '+ str(step))
-                    self.save(self.sess, self.save_dir, step)
-                cost_time=time.time()-start_time
-                print('cost {}s.'.format(cost_time))
-                # self.eval()
-                # if step % (self.save_iter_gap*2) == 0:
-                #     self.test_video_lr(r'H:\AI4K\data\frame_data\testing_540p_LR\16842928', r'H:\AI4K\data\testing_540p_results')
-
-                cost_time=time.time()-start_time
-                start_time=time.time()
-                print('cost {}s.'.format(cost_time))
 
             lr1,hr=self.sess.run([self.LR_one_batch,self.HR_one_batch])
-            _,loss_v,ss=self.sess.run([self.training_op, self.loss, self.merge_op],feed_dict={self.L_train:lr1, self.GT:hr})
-            
+            _,loss_v,ss=self.sess.run([self.training_op, self.loss, self.merge_op_training],feed_dict={self.L_train:lr1, self.GT:hr})
+            loss_epoch += loss_v
+            if step>gs and step % 10 == 0:
+                print(time.strftime("%Y-%m-%d %H:%M:%S",time.localtime()),'Step:{}, loss:{}'.format(step,loss_v))
             self.writer.add_summary(ss, step)
 
             if step>500 and loss_v>10:
                 print('Model collapsed with loss={}'.format(loss_v))
                 break
+
+            # eval and save model
+            if step % self.save_iter_gap == 0 and step!=0:
+                if step>gs:
+                    print('saving model at global step: '+ str(step))
+                    self.save(self.sess, self.save_dir, step)
+                epoch += 1
+                loss_epoch = loss_epoch / self.save_iter_gap
         
+                self.eval(epoch, loss_epoch)
+                loss_epoch = 0
+
         self.writer.close()
 
-    def test_video_truth(self, path, name='result', reuse=False, part=50):
-        save_path=join(path,name)
-        automkdir(save_path)
-        inp_path=join(path,'truth')
-        imgs=sorted(glob.glob(join(inp_path,'*.png')))
-        max_frame=len(imgs)
-        imgs=np.array([cv2_imread(i) for i in imgs])/255.
-
-        if part>max_frame:
-            part=max_frame
-        if max_frame%part ==0 :
-            num_once=max_frame//part
-        else:
-            num_once=max_frame//part+1
-        
-        h,w,c=imgs[0].shape
-
-        L_test = tf.placeholder(tf.float32, shape=[num_once, self.num_frames, h//self.scale, w//self.scale, 3], name='L_test')
-        SR_test=self.forward(L_test)
-        if not reuse:
-            self.img_hr=tf.placeholder(tf.float32, shape=[None, None, None, 3], name='H_truth')
-            self.img_lr=DownSample_4D(self.img_hr, BLUR, scale=self.scale)
-            config = tf.ConfigProto() 
-            config.gpu_options.allow_growth = True
-            sess = tf.Session(config=config) 
-            #sess=tf.Session()
-            self.sess=sess
-            sess.run(tf.global_variables_initializer())
-            self.saver = tf.train.Saver(max_to_keep=100, keep_checkpoint_every_n_hours=1)
-            self.load(sess, self.save_dir)
-        
-        lrs=self.sess.run(self.img_lr,feed_dict={self.img_hr:imgs})
-
-        lr_list=[]
-        max_frame=lrs.shape[0]
-        for i in range(max_frame):
-            index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
-            index=np.clip(index,0,max_frame-1).tolist()
-            lr_list.append(np.array([lrs[j] for j in index]))
-        lr_list=np.array(lr_list)
-        
-        print('Save at {}'.format(save_path))
-        print('{} Inputs With Shape {}'.format(lrs.shape[0],lrs.shape[1:]))
-        h,w,c=lrs.shape[1:]
-        
-        
-        all_time=[]
-        for i in trange(part):
-            st_time=time.time()
-            sr=self.sess.run(SR_test,feed_dict={L_test : lr_list[i*num_once:(i+1)*num_once]})
-            all_time.append(time.time()-st_time)
-            for j in range(sr.shape[0]):
-                img=sr[j][0]*255.
-                img=np.clip(img,0,255)
-                img=np.round(img,0).astype(np.uint8)
-                cv2_imsave(join(save_path, '{:0>4}.png'.format(i*num_once+j)),img)
-        all_time=np.array(all_time)
-        if max_frame>0:
-            all_time=np.array(all_time)
-            print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
-
-
+  
     def test_video_lr(self, path, output_path, exp_name='PFNL_result'):
         num_once = 1
         _, video_name = os.path.split(path)
@@ -330,21 +270,20 @@ class PFNL(VSR):
         lrs = lrs.astype('float32')
         h,w,_=lrs[0].shape
         lr_list=[]
-        
+
         for i in range(max_frame):
             index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
             index=np.clip(index,0,max_frame-1).tolist()
             lr_list.append(np.array([lrs[j] for j in index]))
         del lrs
         lr_list=np.array(lr_list)
-       
 
         L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
         SR_test=self.forward(L_test)
 
         print('Save at {}'.format(save_path))
         print('{} Inputs With Shape {}'.format(max_frame,[h,w]))
-        
+
         all_time=[]
         for i in trange(max_frame):
             st_time=time.time()
@@ -360,27 +299,14 @@ class PFNL(VSR):
         if max_frame>0:
             all_time=np.array(all_time)
             print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
-        
+
         del imgs
         del L_test
         del SR_test
         # del lrs
         del lr_list
 
-    def testvideos(self, path='/dev/f/data/video/test2/udm10', start=0, name='pfnl'):
-        kind=sorted(glob.glob(join(path,'*')))
-        kind=[k for k in kind if os.path.isdir(k)]
-        reuse=False
-        for k in kind:
-            idx=kind.index(k)
-            if idx>=start:
-                if idx>start:
-                    reuse=True
-                datapath=join(path,k)
-                self.test_video_truth(datapath, name=name, reuse=reuse, part=1000)
-            
-    
+
+
 if __name__=='__main__':
-    model=PFNL()
-    #model.train()
-    model.testvideos('H:/AI4K/PFNL-master/data/calendar')
+    pass

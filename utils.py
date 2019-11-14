@@ -367,7 +367,7 @@ def cv2_imsave(img_path, img, quality=100):
 
 def cv2_imread(img_path):
     img=cv2.imread(img_path)
-    # img=cv2.resize(img, (int(img.shape[1]*0.1), int(img.shape[0]*0.1)))
+    # img=cv2.resize(img, (int(img.shape[1]*0.3), int(img.shape[0]*0.3)))
     if img.ndim == 3:
         img = img[:, :, [2, 1, 0]]
     return img
