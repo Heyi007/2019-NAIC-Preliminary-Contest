@@ -1,0 +1,5 @@
+{"Epoch": 00002 , "Training Loss":0.203610, " Eval PSNR": 16.3626, "Eval SSIM": 0.4301}
+{"Epoch": 00004 , "Training Loss":0.200789, " Eval PSNR": 15.4034, "Eval SSIM": 0.4023}
+{"Epoch": 00006 , "Training Loss":0.197626, " Eval PSNR": 16.5530, "Eval SSIM": 0.4322}
+{"Epoch": 00008 , "Training Loss":0.193987, " Eval PSNR": 16.5310, "Eval SSIM": 0.4305}
+{"Epoch": 00010 , "Training Loss":0.194548, " Eval PSNR": 17.2564, "Eval SSIM": 0.4487}

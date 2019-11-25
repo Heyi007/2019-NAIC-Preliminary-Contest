@@ -1,0 +1,1 @@
+{"Epoch": 00021 , "Training Loss":-1.000000, " Eval PSNR": 32.6704, "Eval SSIM": 0.8703}

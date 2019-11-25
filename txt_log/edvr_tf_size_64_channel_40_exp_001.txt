@@ -1,0 +1,9 @@
+{"Epoch": 00002 , "Training Loss":0.197828, " Eval PSNR": 28.0311, "Eval SSIM": 0.6104}
+{"Epoch": 00004 , "Training Loss":0.189912, " Eval PSNR": 26.4460, "Eval SSIM": 0.5435}
+{"Epoch": 00006 , "Training Loss":0.186748, " Eval PSNR": 25.6410, "Eval SSIM": 0.5210}
+{"Epoch": 00008 , "Training Loss":0.183758, " Eval PSNR": 25.0185, "Eval SSIM": 0.5130}
+{"Epoch": 00010 , "Training Loss":0.183722, " Eval PSNR": 24.5704, "Eval SSIM": 0.5007}
+{"Epoch": 00012 , "Training Loss":0.183121, " Eval PSNR": 25.1832, "Eval SSIM": 0.5447}
+{"Epoch": 00014 , "Training Loss":0.181942, " Eval PSNR": 24.2382, "Eval SSIM": 0.5089}
+{"Epoch": 00016 , "Training Loss":0.182573, " Eval PSNR": 24.3057, "Eval SSIM": 0.5000}
+{"Epoch": 00018 , "Training Loss":0.179227, " Eval PSNR": 24.1199, "Eval SSIM": 0.5187}

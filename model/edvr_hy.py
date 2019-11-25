@@ -8,8 +8,10 @@ from PIL import Image
 import scipy
 import time
 import os
-from tensorflow.python.layers.convolutional import Conv2D,conv2d
-from utils import NonLocalBlock, DownSample, DownSample_4D, BLUR, get_num_params, cv2_imread, cv2_imsave, automkdir
+from modules.EDVR_static import EDVR_Core
+# from tensorflow.python.layers.convolutional import Conv2D,conv2d
+# from utils import NonLocalBlock, DownSample, DownSample_4D, BLUR, get_num_params, cv2_imread, cv2_imsave, automkdir
+from utils import get_num_params, cv2_imread, cv2_imsave, automkdir
 from tqdm import tqdm,trange
 from model.base_model import VSR
 from skimage.measure import compare_ssim, compare_psnr
@@ -20,22 +22,26 @@ The code is mainly based on https://github.com/psychopa4/MMCNN and https://githu
 
 class Parameters():
     def __init__(self):
-        self.num_frames=7 #7
+
+        # network structure settings
+        self.num_frames=7          #7
+        self.main_channel_nums =64 #64
+
+        # 
         self.scale=4
         self.in_size=32
         self.gt_size=self.in_size*self.scale
-        self.eval_in_size=[128,240]
         self.batch_size=16
-        self.eval_basz=4
+
         self.learning_rate=1e-3
-        self.end_lr=1e-5
-        self.reload=True
+        self.end_lr=1e-5        
         self.max_step= int(1.5e10+1)
         self.decay_step=1.2e5
-        self.num_blocks = 20 #20
-        self.main_channel_nums =64 #64
+            
+        self.reload=True
         self.save_iter_gap = 1000
-        self.nonLocal_sub_sample_rate = 4
+        
+
         self.train_dir='./data/train.txt'
         self.eval_dir='./data/validation.txt'
         self.save_dir='./checkpoint/pfnl'
@@ -47,15 +53,13 @@ class Parameters():
         self.start_epoch = 1
 
 
-class PFNL(VSR):
+class EDVR(VSR):
     def __init__(self, parameters):
         self.num_frames = parameters.num_frames
         self.scale = parameters.scale
         self.in_size = parameters.in_size
         self.gt_size = self.in_size*self.scale
-        self.eval_in_size = parameters.eval_in_size
         self.batch_size = parameters.batch_size
-        self.eval_basz = parameters.eval_basz
         self.learning_rate = parameters.learning_rate
         self.end_lr = parameters.end_lr
         self.reload = parameters.reload
@@ -66,17 +70,24 @@ class PFNL(VSR):
         self.save_dir = parameters.save_dir
         self.log_dir = parameters.log_dir
         self.tensorboard_dir = parameters.tensorboard_dir
-        self.num_blocks = parameters.num_blocks
+        
         self.main_channel_nums =parameters.main_channel_nums
         self.save_iter_gap = parameters.save_iter_gap
-        self.nonLocal_sub_sample_rate =parameters.nonLocal_sub_sample_rate
         self.start_epoch = parameters.start_epoch
 
         # build the main network computational graph
+        # # the main SR network: EDVR or PFNL
+        self.model = EDVR_Core(nf = self.main_channel_nums, nframes = self.num_frames)
+
         self.GT = tf.placeholder(tf.float32, shape=[None, 1, None, None, 3], name='H_truth')
         self.L_train = tf.placeholder(tf.float32, shape=[self.batch_size, self.num_frames, self.in_size, self.in_size, 3], name='L_train')
-
         self.SR = self.forward(self.L_train)
+
+        self.L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, None, None, 3], name='L_test')
+        self.SR_test=self.forward(self.L_test)
+       
+        
+
         self.loss = tf.reduce_mean(tf.sqrt((self.SR-self.GT)**2+1e-6))
 
         # data loader and training supports
@@ -114,6 +125,7 @@ class PFNL(VSR):
         config.gpu_options.allow_growth = True
         self.sess = tf.Session(config=config)
 
+        print('[**] Initialzing global varibles ...')
         self.sess.run(tf.global_variables_initializer())
 
         self.saver = tf.train.Saver(max_to_keep=50, keep_checkpoint_every_n_hours=1)
@@ -127,58 +139,16 @@ class PFNL(VSR):
         self.eval_frame_data_LR = []
         pathlists = open(self.eval_dir, 'rt').read().splitlines()
         for dataPath in pathlists:
-            inList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/LR', dataPath, '*.png')))
-            gtList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/HR', dataPath, '*.png')))
+            inList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/validation/LR', dataPath, '*.png')))
+            gtList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/validation/HR', dataPath, '*.png')))
             assert(len(inList)==len(gtList))
             self.eval_frame_data_HR.append(gtList)
             self.eval_frame_data_LR.append(inList)
       
-
     def forward(self, x):
-
-        dk=3
-        activate=tf.nn.leaky_relu
-        mf=self.main_channel_nums
-        num_block=self.num_blocks
-        n,f1,w,h,c=x.shape
-        ki=tf.contrib.layers.xavier_initializer()
-        ds=1
-        with tf.variable_scope('nlvsr',reuse=tf.AUTO_REUSE) as scope:
-            conv0=Conv2D(mf, 5, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='conv0')
-            conv1=[Conv2D(mf, dk, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='conv1_{}'.format(i)) for i in range(num_block)]
-            conv10=[Conv2D(mf, 1, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='conv10_{}'.format(i)) for i in range(num_block)]
-            conv2=[Conv2D(mf, dk, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='conv2_{}'.format(i)) for i in range(num_block)]
-            convmerge1=Conv2D(48, 3, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='convmerge1')
-            convmerge2=Conv2D(12, 3, strides=ds, padding='same', activation=None, kernel_initializer=ki, name='convmerge2')
-
-            inp0=[x[:,i,:,:,:] for i in range(f1)]
-            inp0=tf.concat(inp0,axis=-1)
-            inp1=tf.space_to_depth(inp0,2)
-            inp1=NonLocalBlock(inp1,int(c)*self.num_frames*4,sub_sample=self.nonLocal_sub_sample_rate, nltype=1,scope='nlblock_{}'.format(0))
-            inp1=tf.depth_to_space(inp1,2)
-            inp0+=inp1
-            inp0=tf.split(inp0, num_or_size_splits=self.num_frames, axis=-1)
-            inp0=[conv0(f) for f in inp0]
-            bic=tf.image.resize_images(x[:,self.num_frames//2,:,:,:],[w*self.scale,h*self.scale],method=2)
-
-            for i in range(num_block):
-                inp1=[conv1[i](f) for f in inp0]
-                base=tf.concat(inp1,axis=-1)
-                base=conv10[i](base)
-                inp2=[tf.concat([base,f],-1) for f in inp1]
-                inp2=[conv2[i](f) for f in inp2]
-                inp0=[tf.add(inp0[j],inp2[j]) for j in range(f1)]
-
-
-            merge=tf.concat(inp0,axis=-1)
-            merge=convmerge1(merge)
-
-            large1=tf.depth_to_space(merge,2)
-            out1=convmerge2(large1)
-            out=tf.depth_to_space(out1,2)
-
-        return tf.stack([out+bic], axis=1,name='out')#out
-
+        # model = EDVR_Core(nf = self.main_channel_nums, nframes = self.num_frames)
+        out = self.model(x)
+        return out
 
     def eval(self, epoch, loss_epoch):
         print('Evaluating on the validation set...')
@@ -192,10 +162,10 @@ class PFNL(VSR):
             
             cur_video_HR = self.eval_frame_data_HR[video_index]
             max_frame = len(cur_video_LR)
-            temp_img = cv2_imread(cur_video_LR[0])
-            h,w,_ = temp_img.shape
-            L_eval = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
-            SR_test = self.forward(L_eval)
+            # temp_img = cv2_imread(cur_video_LR[0])
+            # h,w,_ = temp_img.shape
+            # L_eval = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
+            # SR_test = self.forward(L_eval)
             for i in range(max_frame):
                 start_time = time.time()
                 count+=1
@@ -205,9 +175,9 @@ class PFNL(VSR):
                 lrs = lrs.astype('float32')
                 lrs = np.expand_dims(lrs, 0)
 
-                sr = self.sess.run(SR_test, feed_dict={L_eval: lrs})
+                sr = self.sess.run(self.SR_test, feed_dict={self.L_test: lrs})
                 sr = sr*255
-                sr = np.squeeze(sr, axis = (0,1))
+                sr = np.squeeze(sr, axis = (0))
                 sr = np.clip(sr,0,255)
                 sr = np.round(sr,0).astype(np.uint8)
                 hr = cv2_imread(cur_video_HR[i])
@@ -242,9 +212,23 @@ class PFNL(VSR):
         for step in range(self.sess.run(self.global_step), self.max_step):
 
             lr1,hr=self.sess.run([self.LR_one_batch,self.HR_one_batch])
-            _,loss_v,ss=self.sess.run([self.training_op, self.loss, self.merge_op_training],feed_dict={self.L_train:lr1, self.GT:hr})
+            SR,_,loss_v,ss=self.sess.run([self.SR, self.training_op, self.loss, self.merge_op_training],feed_dict={self.L_train:lr1, self.GT:hr})
+            
+            # SR = SR * 255.0
+            # hr = hr * 255.0
+            # for i in range(SR.shape[0]):
+            #     a = SR[i]
+            #     b = hr[i,0,:,:,:]
+            #     a=np.clip(a, 0, 255)
+            #     a=np.round(a,0).astype(np.uint8)
+            #     b=np.clip(b, 0, 255)
+            #     b=np.round(b,0).astype(np.uint8)
+            #     cv2.imwrite(str(i)+".png", a)
+            #     cv2.imwrite(str(i)+"_GT.png", b)
+            # break
+
             loss_epoch += loss_v
-            if step>gs and step % 10 == 0:
+            if step>gs and step % 1 == 0:
                 print(time.strftime("%Y-%m-%d %H:%M:%S",time.localtime()),'Step:{}, loss:{}'.format(step,loss_v))
             self.writer.add_summary(ss, step)
 
@@ -287,8 +271,8 @@ class PFNL(VSR):
         del lrs
         lr_list=np.array(lr_list)
 
-        L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
-        SR_test=self.forward(L_test)
+        # L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
+        # SR_test=self.forward(L_test)
 
         print('Save at {}'.format(save_path))
         print('{} Inputs With Shape {}'.format(max_frame,[h,w]))
@@ -296,10 +280,10 @@ class PFNL(VSR):
         all_time=[]
         for i in trange(max_frame):
             st_time=time.time()
-            sr=self.sess.run(SR_test,feed_dict={L_test : lr_list[i*num_once:(i+1)*num_once]})
+            sr=self.sess.run(self.SR_test,feed_dict={self.L_test : lr_list[i*num_once:(i+1)*num_once]})
             all_time.append(time.time()-st_time)
             for j in range(sr.shape[0]):
-                img=sr[j][0]*255.
+                img=sr[j]*255.
                 img=np.clip(img,0,255)
                 img=np.round(img,0).astype(np.uint8)
                 cv2_imsave(join(save_path, '{:0>4}.jpg'.format(i*num_once+j)),img, 100)
@@ -310,8 +294,8 @@ class PFNL(VSR):
             print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
 
         del imgs
-        del L_test
-        del SR_test
+        # del L_test
+        # del SR_test
         # del lrs
         del lr_list
 

@@ -114,6 +114,19 @@ class VSR(object):
             check = tf.Assert(tf.reduce_all(shape >= size), ["Need value.shape >= size, got ", shape, size])
             shape = control_flow_ops.with_dependencies([check], shape)
 
+            # limit2 = shape[1:] - size[1:] + 1
+
+            # crop_padding = tf.cast(shape[0], tf.float32)*tf.convert_to_tensor(0.15, dtype = tf.float32)
+            # crop_padding = tf.cast(crop_padding, tf.int32)
+            # limit1 = shape[0] - crop_padding*2 + 1
+            # limit1 = tf.expand_dims(limit1, axis = 0)
+            
+            # # limit = tf.concat([limit1, limit2], 0)
+            # offset1 = tf.random_uniform(tf.shape(limit1), dtype=size.dtype, maxval=size.dtype.max, seed=None) % limit1
+            # offset2 = tf.random_uniform(tf.shape(limit2), dtype=size.dtype, maxval=size.dtype.max, seed=None) % limit2
+
+            # offset = tf.concat([offset1, offset2], 0)
+            
             limit = shape - size + 1
             offset = tf.random_uniform(tf.shape(shape), dtype=size.dtype, maxval=size.dtype.max, seed=None) % limit
 

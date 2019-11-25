@@ -10,9 +10,11 @@ if __name__=='__main__':
     p = Parameters()
     p.num_frames=7 #7
     p.scale=4
-    p.in_size=64
+    p.in_size=32
     p.gt_size=p.in_size*p.scale
-    p.batch_size=8
+    p.eval_in_size=[128,240]
+    p.batch_size=16
+    p.eval_basz=4
     p.learning_rate=1e-4
     p.end_lr=1e-6
     p.reload=True
@@ -20,19 +22,24 @@ if __name__=='__main__':
     p.decay_step=1.2e5
     p.num_blocks = 20 #20
     p.main_channel_nums =64 #64
-    # we consider every save_iter_gap iterations to be one epoch
     p.save_iter_gap = 1000
     p.nonLocal_sub_sample_rate = 4
 
-    p.exp_name = 'pfnl_hy_nonLocal_rx4_size_64_exp_1'
+    p.exp_name = 'pfnl_hy_nonLocal_subsmaplex4_no_eval_exp_3'
 
     p.save_dir='./checkpoint/'+ p.exp_name
-    p.log_dir='./txt_log/' + p.exp_name + '.txt'
-    # with open(p.log_dir, 'a+') as f:
-    #     f.writelines('Comment: concate the input and the output of Nonlocal module \n')
+    p.log_dir='./txt_log/' + p.exp_name
     p.tensorboard_dir = './tb_log/' + p.exp_name
 
     model=PFNL(p)
-    
-    model.train()
-    # model.test_video_lr(r'H:\AI4K\data\frame_data\training\LR\11044561', r'H:\AI4K\data\testing_540p_results', name='PFNL_exp_2_jpg100')
+
+    test_dir = r'H:\AI4K\data\frame_data\testing_540p_LR'
+    save_dir = r'D:\AI4K\testing_540p_results_frame'
+ 
+    names = os.listdir(test_dir)
+    names = sorted(names)
+    names = names[6:]
+    for name in names:
+        
+        test_path = os.path.join(test_dir, name) 
+        model.test_video_lr(test_path, save_dir, p.exp_name)
