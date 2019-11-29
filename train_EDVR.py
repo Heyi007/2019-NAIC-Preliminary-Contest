@@ -20,7 +20,7 @@ if __name__=='__main__':
     p.max_step= int(1.5e10+1)
     p.decay_step=1.2e5
   
-    p.main_channel_nums = 40 #64
+    p.main_channel_nums = 64 #64
     # we consider every save_iter_gap iterations to be one epoch
     p.save_iter_gap = 1000
   

@@ -127,8 +127,8 @@ class PFNL(VSR):
         self.eval_frame_data_LR = []
         pathlists = open(self.eval_dir, 'rt').read().splitlines()
         for dataPath in pathlists:
-            inList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/LR', dataPath, '*.png')))
-            gtList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/training/HR', dataPath, '*.png')))
+            inList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/validation/LR', dataPath, '*.png')))
+            gtList = sorted(glob.glob(os.path.join('H:/AI4K/data/frame_data/validation/HR', dataPath, '*.png')))
             assert(len(inList)==len(gtList))
             self.eval_frame_data_HR.append(gtList)
             self.eval_frame_data_LR.append(inList)
@@ -151,15 +151,17 @@ class PFNL(VSR):
             convmerge1=Conv2D(48, 3, strides=ds, padding='same', activation=activate, kernel_initializer=ki, name='convmerge1')
             convmerge2=Conv2D(12, 3, strides=ds, padding='same', activation=None, kernel_initializer=ki, name='convmerge2')
 
-            inp0=[x[:,i,:,:,:] for i in range(f1)]
-            inp0=tf.concat(inp0,axis=-1)
-            inp1=tf.space_to_depth(inp0,2)
-            inp1=NonLocalBlock(inp1,int(c)*self.num_frames*4,sub_sample=self.nonLocal_sub_sample_rate, nltype=1,scope='nlblock_{}'.format(0))
-            inp1=tf.depth_to_space(inp1,2)
-            inp0+=inp1
-            inp0=tf.split(inp0, num_or_size_splits=self.num_frames, axis=-1)
-            inp0=[conv0(f) for f in inp0]
-            bic=tf.image.resize_images(x[:,self.num_frames//2,:,:,:],[w*self.scale,h*self.scale],method=2)
+            inp0=[x[:,i,:,:,:] for i in range(f1)]   # list[7]:Tensor[8, 64, 64, 3]
+            inp0=tf.concat(inp0,axis=-1)             # Tensor:[8,64,64,21]
+            inp1=tf.space_to_depth(inp0,2)           # Tensor:[8,32,32,84]
+            # Tensor:[8,32,32,84]
+            with tf.device('/cpu:0'):
+                inp1=NonLocalBlock(inp1,int(c)*self.num_frames*4,sub_sample=self.nonLocal_sub_sample_rate, nltype=1,scope='nlblock_{}'.format(0))
+            inp1=tf.depth_to_space(inp1,2)           # Tensor:[8,64,64,21]
+            inp0+=inp1                               # Tensor:[8,64,64,21]
+            inp0=tf.split(inp0, num_or_size_splits=self.num_frames, axis=-1)        # list[7]:Tensor[8, 64, 64, 3]
+            inp0=[conv0(f) for f in inp0]            # list[7]:Tensor[8, 64, 64, 64]
+            bic=tf.image.resize_images(x[:,self.num_frames//2,:,:,:],[w*self.scale,h*self.scale],method=2)     # Tensor:[8,256,256,3]
 
             for i in range(num_block):
                 inp1=[conv1[i](f) for f in inp0]
@@ -167,17 +169,17 @@ class PFNL(VSR):
                 base=conv10[i](base)
                 inp2=[tf.concat([base,f],-1) for f in inp1]
                 inp2=[conv2[i](f) for f in inp2]
-                inp0=[tf.add(inp0[j],inp2[j]) for j in range(f1)]
+                inp0=[tf.add(inp0[j],inp2[j]) for j in range(f1)]        
 
 
-            merge=tf.concat(inp0,axis=-1)
-            merge=convmerge1(merge)
+            merge=tf.concat(inp0,axis=-1)       # inp0: list[7]:Tensor[8, 64, 64, 64], merge: Tensor[8,64,64,448=7*64]
+            merge=convmerge1(merge)             # merge: Tensor[8,64,64,48]
 
-            large1=tf.depth_to_space(merge,2)
-            out1=convmerge2(large1)
-            out=tf.depth_to_space(out1,2)
+            large1=tf.depth_to_space(merge,2)   # large: Tenosr[8,128,128,12]
+            out1=convmerge2(large1)             # out1: Tensor[8,128,128,12]
+            out=tf.depth_to_space(out1,2)       # out: Tensor[8,256,256,3]
 
-        return tf.stack([out+bic], axis=1,name='out')#out
+        return tf.stack([out+bic], axis=1,name='out')       #out: 
 
 
     def eval(self, epoch, loss_epoch):
@@ -244,7 +246,7 @@ class PFNL(VSR):
             lr1,hr=self.sess.run([self.LR_one_batch,self.HR_one_batch])
             _,loss_v,ss=self.sess.run([self.training_op, self.loss, self.merge_op_training],feed_dict={self.L_train:lr1, self.GT:hr})
             loss_epoch += loss_v
-            if step>gs and step % 10 == 0:
+            if step>gs and step % 1 == 0:
                 print(time.strftime("%Y-%m-%d %H:%M:%S",time.localtime()),'Step:{}, loss:{}'.format(step,loss_v))
             self.writer.add_summary(ss, step)
 
@@ -256,7 +258,7 @@ class PFNL(VSR):
             if step % self.save_iter_gap == 0 and step!=0:
                 if step>gs:
                     print('saving model at global step: '+ str(step))
-                    self.save(self.sess, self.save_dir, step)
+                    # self.save(self.sess, self.save_dir, step)
                 
                 loss_epoch = loss_epoch / self.save_iter_gap
                 if step % (self.save_iter_gap*2) == 0:
@@ -302,7 +304,7 @@ class PFNL(VSR):
                 img=sr[j][0]*255.
                 img=np.clip(img,0,255)
                 img=np.round(img,0).astype(np.uint8)
-                cv2_imsave(join(save_path, '{:0>4}.jpg'.format(i*num_once+j)),img, 100)
+                cv2_imsave(join(save_path, '{:0>4}.png'.format(i*num_once+j)),img, 100)
 
         all_time=np.array(all_time)
         if max_frame>0:
@@ -315,6 +317,78 @@ class PFNL(VSR):
         # del lrs
         del lr_list
 
+    def makeup(self, path, output_path, exp_name='PFNL_result', method = 'replicate'):
+        print(' [**] Using makeup method: ' + method)
+        _, video_name = os.path.split(path)
+        save_path=join(output_path, exp_name, method, video_name)
+        automkdir(save_path)
+        imgs=sorted(glob.glob(join(path,'*.png')))
+        max_frame=len(imgs)
+        lrs=np.array([cv2_imread(i) for i in imgs])/255.
+        lrs = lrs.astype('float32')
+        h,w,_=lrs[0].shape
+        lr_list=[]
+
+        deal_index_1 = np.linspace(0, self.num_frames//2-1, self.num_frames//2, dtype = np.int)
+        deal_index_2 = np.linspace(max_frame-self.num_frames//2, max_frame-1, self.num_frames//2, dtype = np.int)
+        deal_index = np.concatenate((deal_index_1, deal_index_2), axis=0)
+        # max_frame = len(deal_index)
+        for i in deal_index:
+            index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
+            if method == 'replicate':
+                # index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
+                index=np.clip(index,0,max_frame-1)
+            elif method == 'reflection':
+                # index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
+                for ii in range(len(index)):
+                    index[ii] = index[ii] if index[ii]>=0 else index[ii] * -1
+                    index[ii] = index[ii] if index[ii]<max_frame else 2*(max_frame-1) - index[ii]
+            elif method == 'new_info':
+                # index=np.array([i for i in range(i-self.num_frames//2,i+self.num_frames//2+1)])
+                for ii in range(len(index)):
+                    index[ii] = index[ii] if index[ii]>=0 else index[ii] * -1 + index[-1]
+                    index[ii] = index[ii] if index[ii]<max_frame else index[0] - (index[ii]-max_frame+1)
+            elif method == 'circle':
+                for ii in range(len(index)):
+                    index[ii] = index[ii] if index[ii]>=0 else self.num_frames + index[ii]
+                    index[ii] = index[ii] if index[ii]<max_frame else index[ii] - i + index[0] - self.num_frames//2 -1
+            
+            index = index.tolist()
+            lr_list.append(np.array([lrs[j] for j in index]))
+
+        del lrs
+        lr_list=np.array(lr_list)
+
+        L_test = tf.placeholder(tf.float32, shape=[1, self.num_frames, h, w, 3], name='L_test')
+        SR_test=self.forward(L_test)
+
+        print('Save at {}'.format(save_path))
+        print('{} Inputs With Shape {}'.format(max_frame,[h,w]))
+
+        all_time=[]
+
+
+        for i in trange(len(deal_index)):
+            # i = deal_index[cc]
+            st_time=time.time()
+            sr=self.sess.run(SR_test,feed_dict={L_test : lr_list[i:(i+1)]})
+            all_time.append(time.time()-st_time)
+            for j in range(sr.shape[0]):
+                img=sr[j][0]*255.
+                img=np.clip(img,0,255)
+                img=np.round(img,0).astype(np.uint8)
+                cv2_imsave(join(save_path, '{:0>4}.png'.format(deal_index[i])),img, 100)
+
+        all_time=np.array(all_time)
+        if max_frame>0:
+            all_time=np.array(all_time)
+            print('spent {} s in total and {} s in average'.format(np.sum(all_time),np.mean(all_time[1:])))
+
+        del imgs
+        del L_test
+        del SR_test
+        # del lrs
+        del lr_list
 
 
 if __name__=='__main__':

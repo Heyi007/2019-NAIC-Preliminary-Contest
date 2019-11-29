@@ -1,2 +1,4 @@
 checkpoint
 .vscode
+__pycache__
+tb_log
