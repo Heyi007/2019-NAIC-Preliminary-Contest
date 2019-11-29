@@ -2,7 +2,9 @@
 Code for 2019-NAIC-Preliminary-Contest
 
 We tried FPNL and EDVR.
+
 train FPNL: python train_FPNL.py
+
 train EDVR: pythob train_EDVR.py
 
 
