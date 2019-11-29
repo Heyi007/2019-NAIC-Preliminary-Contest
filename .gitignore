@@ -2,3 +2,6 @@ checkpoint
 .vscode
 __pycache__
 tb_log
+model/__pycache__
+modules/__pycache__
+deformable_conv/__pycache__
