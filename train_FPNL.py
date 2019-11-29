@@ -18,13 +18,13 @@ if __name__=='__main__':
     p.reload=True
     p.max_step= int(1.5e10+1)
     p.decay_step=1.2e5
-    p.num_blocks = 32 #20
-    p.main_channel_nums =64 #64
+    p.num_blocks = 20 #20
+    p.main_channel_nums =128 #64
     # we consider every save_iter_gap iterations to be one epoch
     p.save_iter_gap = 1#1000
-    p.nonLocal_sub_sample_rate = 4
+    p.nonLocal_sub_sample_rate = 2
 
-    p.exp_name = 'pfnl_hy_nonLocal_rx4_size_64_channel_32_exp_1_TEST' #'pfnl_hy_nonLocal_subsmaplex4_no_eval_exp_3' #
+    p.exp_name = 'pfnl_hy_nonLocal_rx2_size_64_channel_128_exp_1' #'pfnl_hy_nonLocal_subsmaplex4_no_eval_exp_3' #
 
     p.save_dir='./checkpoint/'+ p.exp_name
     p.log_dir='./txt_log/' + p.exp_name + '.txt'
