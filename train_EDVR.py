@@ -32,7 +32,7 @@ if __name__=='__main__':
     #     f.writelines('Comment: concate the input and the output of Nonlocal module \n')
     p.tensorboard_dir = './tb_log/' + p.exp_name
     p.start_epoch = 1
-
+ 
     model=EDVR(p)
     
     # model.eval(-1,-1.0)
