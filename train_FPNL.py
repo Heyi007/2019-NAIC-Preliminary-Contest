@@ -14,7 +14,7 @@ if __name__=='__main__':
     p.in_size=64
     p.gt_size=p.in_size*p.scale
     p.batch_size=4
-    p.learning_rate= 2e-5
+    p.learning_rate= 1e-4
     p.end_lr=1e-8
     p.reload=True
     p.max_step= int(1.5e10+1)
@@ -48,7 +48,7 @@ if __name__=='__main__':
         print('[**System cmd**]: ' + cmd +'\n')
         os.system(cmd)
 
-    p.start_epoch = 7  # epoch first uesed and then add 1
+    p.start_epoch = 1  # epoch first uesed and then add 1
 
     model=PFNL(p)
     
