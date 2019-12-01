@@ -7,6 +7,7 @@ train FPNL: python train_FPNL.py
 
 train EDVR: pythob train_EDVR.py
 
+More detailed introduction about this project can be found in the [Kesci K-lab notbook](https://www.kesci.com/api/notebooks/5de34a44ca27f8002c4bd40c/RenderedContent)
 
 [FPNL](https://github.com/psychopa4/PFNL):
 @inproceedings{PFNL,
