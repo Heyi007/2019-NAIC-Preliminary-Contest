@@ -7,7 +7,7 @@ train FPNL: python train_FPNL.py
 
 train EDVR: pythob train_EDVR.py
 
-More detailed introduction about this project can be found in the [Kesci K-lab notbook](https://www.kesci.com/api/notebooks/5de35186ca27f8002c4bd738/RenderedContent).
+More detailed introduction about this project can be found in the [Kesci K-lab notbook](https://www.kesci.com/api/notebooks/5de36912ca27f8002c4be0ea/RenderedContent).
 
 The trained model of this project can be download from:
 
