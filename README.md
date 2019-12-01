@@ -10,8 +10,10 @@ train EDVR: pythob train_EDVR.py
 More detailed introduction about this project can be found in the [Kesci K-lab notbook](https://www.kesci.com/api/notebooks/5de34a44ca27f8002c4bd40c/RenderedContent).
 
 The trained model of this project can be download from:
- 服务器下载:[http://dutmedia.org/4kai_model.zip](http://dutmedia.org/4kai_model.zip)
- 百度云盘下载:[https://pan.baidu.com/s/10CDA3lj5xUhjL6GRSMEqIg](https://pan.baidu.com/s/10CDA3lj5xUhjL6GRSMEqIg) 提取码: 3hmp
+
+服务器下载:[http://dutmedia.org/4kai_model.zip](http://dutmedia.org/4kai_model.zip).
+
+百度云盘下载:[https://pan.baidu.com/s/10CDA3lj5xUhjL6GRSMEqIg](https://pan.baidu.com/s/10CDA3lj5xUhjL6GRSMEqIg) 提取码: 3hmp
 
 
 [FPNL](https://github.com/psychopa4/PFNL):
