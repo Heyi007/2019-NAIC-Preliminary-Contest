@@ -1,4 +1,4 @@
-# 2019-NAIC-Preliminary-Contest
+# 2019-NAIC-Preliminary-Contest (Video Super Resolution)
 Code for 2019-NAIC-Preliminary-Contest
 
 We tried FPNL and EDVR.
